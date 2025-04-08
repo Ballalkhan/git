@@ -7,6 +7,14 @@ UI, Workflows & Features
  * A post-processing filter for "diff --raw" output has been
    introduced.
 
+ * "git repack" learned "--combine-cruft-below-size" option that
+   controls how cruft-packs are combined.
+
+ * TCP keepalive behaviour on http transports can now be configured by
+   calling cURL library.
+
+ * Incrementally updating multi-pack index files.
+
 
 Performance, Internal Implementation, Development Support etc.
 --------------------------------------------------------------
@@ -16,6 +24,36 @@ Performance, Internal Implementation, Development Support etc.
    caller.
 
  * "git fsck" becomes more careful when checking the refs.
+
+ * "git fast-export | git fast-import" learns to deal with commit and
+   tag objects with embedded signatures a bit better.
+
+ * The code paths to check whether a refname X is available (by seeing
+   if another ref X/Y exists, etc.) have been optimized.
+
+ * First step of deprecating and removing merge-recursive.
+
+ * In protocol v2 where the refs advertisement is constrained, we try
+   to tell the server side not to limit the advertisement when there
+   is no specific need to, which has been the source of confusion and
+   recent bugs.  Revamp the logic to simplify.
+
+ * Update meson based build procedure for breaking changes support.
+
+ * Enable -Wunreachable-code for developer builds.
+
+ * Ensure what we write in assert() does not have side effects,
+   and introduce ASSERT() macro to mark those that cannot be
+   mechanically checked for lack of side effects.
+
+ * Give more meaningful error return values from block writer layer of
+   the reftable ref-API backend.
+
+ * Make the code in reftable library less reliant on the service
+   routines it used to borrow from Git proper, to make it easier to
+   use by external users of the library.
+
+ * CI update.
 
 
 Fixes since v2.49
@@ -30,5 +68,59 @@ Fixes since v2.49
    when certain renames are involved.
    (merge 3adba40858 en/merge-process-renames-crash-fix later to maint).
 
+ * Certain "cruft" objects would have never been refreshed when there
+   are multiple cruft packs in the repository, which has been
+   corrected.
+   (merge 08f612ba70 tb/multi-cruft-pack-refresh-fix later to maint).
+
+ * The xdiff code on 32-bit platform misbehaved when an insanely large
+   context size is given, which has been corrected.
+   (merge d39e28e68c rs/xdiff-context-length-fix later to maint).
+
+ * GitHub Actions CI switched on a CI/CD variable that does not exist
+   when choosing what packages to install etc., which has been
+   corrected.
+   (merge ee89f7c79d kn/ci-meson-check-build-docs-fix later to maint).
+
+ * Using "git name-rev --stdin" as an example, improve the framework to
+   prepare tests to pretend to be in the future where the breaking
+   changes have already happened.
+   (merge de3dec1187 jc/name-rev-stdin later to maint).
+
+ * An earlier code refactoring of the hash machinery missed a few
+   required calls to init_fn.
+   (merge d39f04b638 jh/hash-init-fixes later to maint).
+
+ * A documentation page was left out from formatting and installation,
+   which has been corrected.
+   (merge ae85116f18 pw/build-breaking-changes-doc later to maint).
+
+ * The bash command line completion script (in contrib/) has been
+   updated to cope with remote repository nicknames with slashes in
+   them.
+   (merge 778d2f1760 dm/completion-remote-names-fix later to maint).
+
+ * "Dubious ownership" checks on Windows has been tightened up.
+   (merge 5bb88e89ef js/mingw-admins-are-special later to maint).
+
+ * Layout configuration in vimdiff backend didn't work as advertised,
+   which has been corrected.
+   (merge 93bab2d04b fr/vimdiff-layout-fixes later to maint).
+
  * Other code cleanup, docfix, build fix, etc.
    (merge 227c4f33a0 ja/doc-block-delimiter-markup-fix later to maint).
+   (merge 2bfd3b3685 ab/decorate-code-cleanup later to maint).
+   (merge 5337daddc7 am/dir-dedup-decl-of-repository later to maint).
+   (merge 554051d691 en/diff-rename-follow-fix later to maint).
+   (merge a18c18b470 en/random-cleanups later to maint).
+   (merge 5af21c9acb hj/doc-rev-list-ancestry-fix later to maint).
+   (merge 26d76ca284 aj/doc-restore-p-update later to maint).
+   (merge 2c0dcb9754 cc/lop-remote later to maint).
+   (merge 7b399322a2 ja/doc-branch-markup later to maint).
+   (merge ee434e1807 pw/doc-pack-refs-markup-fix later to maint).
+   (merge c000918eb7 tb/bitamp-typofix later to maint).
+   (merge fa8cd29676 js/imap-send-peer-cert-verify later to maint).
+   (merge 98b423bc1c rs/clear-commit-marks-simplify later to maint).
+   (merge 133d065dd6 ta/bulk-checkin-signed-compare-false-warning-fix later to maint).
+   (merge d2827dc31e es/meson-build-skip-coccinelle later to maint).
+   (merge ee8edb7156 dk/vimdiff-doc-fix later to maint).

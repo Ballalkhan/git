@@ -109,6 +109,7 @@ SP_ARTICLES += howto/coordinate-embargoed-releases
 API_DOCS = $(patsubst %.adoc,%,$(filter-out technical/api-index-skel.adoc technical/api-index.adoc, $(wildcard technical/api-*.adoc)))
 SP_ARTICLES += $(API_DOCS)
 
+TECH_DOCS += BreakingChanges
 TECH_DOCS += DecisionMaking
 TECH_DOCS += ReviewingGuidelines
 TECH_DOCS += MyFirstContribution
@@ -509,7 +510,7 @@ lint-docs-meson:
 	awk "/^manpages = {$$/ {flag=1 ; next } /^}$$/ { flag=0 } flag { gsub(/^  \047/, \"\"); gsub(/\047 : [157],\$$/, \"\"); print }" meson.build | \
 		grep -v -e '#' -e '^$$' | \
 		sort >tmp-meson-diff/meson.adoc && \
-	ls git*.adoc scalar.adoc | grep -v -e git-bisect-lk2009.adoc -e git-tools.adoc >tmp-meson-diff/actual.adoc && \
+	ls git*.adoc scalar.adoc | grep -v -e git-bisect-lk2009.adoc -e git-pack-redundant.adoc -e git-tools.adoc >tmp-meson-diff/actual.adoc && \
 	if ! cmp tmp-meson-diff/meson.adoc tmp-meson-diff/actual.adoc; then \
 		echo "Meson man pages differ from actual man pages:"; \
 		diff -u tmp-meson-diff/meson.adoc tmp-meson-diff/actual.adoc; \

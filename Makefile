@@ -955,7 +955,7 @@ FOUND_SOURCE_FILES := $(filter-out $(GENERATED_H),$(shell $(SOURCES_CMD)))
 FOUND_C_SOURCES = $(filter %.c,$(FOUND_SOURCE_FILES))
 FOUND_H_SOURCES = $(filter %.h,$(FOUND_SOURCE_FILES))
 
-COCCI_SOURCES = $(filter-out $(THIRD_PARTY_SOURCES),$(FOUND_C_SOURCES))
+COCCI_SOURCES = $(filter-out $(THIRD_PARTY_SOURCES) reftable/%,$(FOUND_C_SOURCES))
 
 LIB_H = $(FOUND_H_SOURCES)
 
@@ -995,6 +995,7 @@ LIB_OBJS += common-init.o
 LIB_OBJS += compat/nonblock.o
 LIB_OBJS += compat/obstack.o
 LIB_OBJS += compat/terminal.o
+LIB_OBJS += compiler-tricks/not-constant.o
 LIB_OBJS += config.o
 LIB_OBJS += connect.o
 LIB_OBJS += connected.o
@@ -2260,6 +2261,10 @@ endif
 
 ifdef WITH_BREAKING_CHANGES
 	BASIC_CFLAGS += -DWITH_BREAKING_CHANGES
+endif
+
+ifdef CHECK_ASSERTION_SIDE_EFFECTS
+	BASIC_CFLAGS += -DCHECK_ASSERTION_SIDE_EFFECTS
 endif
 
 ifdef INCLUDE_LIBGIT_RS
