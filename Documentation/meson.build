@@ -97,7 +97,6 @@ manpages = {
   'git-notes.adoc' : 1,
   'git-p4.adoc' : 1,
   'git-pack-objects.adoc' : 1,
-  'git-pack-redundant.adoc' : 1,
   'git-pack-refs.adoc' : 1,
   'git-patch-id.adoc' : 1,
   'git-prune-packed.adoc' : 1,
@@ -206,11 +205,19 @@ manpages = {
   'gitworkflows.adoc' : 7,
 }
 
+manpages_breaking_changes = {
+  'git-pack-redundant.adoc' : 1,
+}
+
+if not get_option('breaking_changes')
+  manpages += manpages_breaking_changes
+endif
+
 docs_backend = get_option('docs_backend')
 if docs_backend == 'auto'
-  if find_program('asciidoc', dirs: program_path, required: false).found()
+  if find_program('asciidoc', dirs: program_path, native: true, required: false).found()
     docs_backend = 'asciidoc'
-  elif find_program('asciidoctor', dirs: program_path, required: false).found()
+  elif find_program('asciidoctor', dirs: program_path, native: true, required: false).found()
     docs_backend = 'asciidoctor'
   else
     error('Neither asciidoc nor asciidoctor were found.')
@@ -218,7 +225,7 @@ if docs_backend == 'auto'
 endif
 
 if docs_backend == 'asciidoc'
-  asciidoc = find_program('asciidoc', dirs: program_path)
+  asciidoc = find_program('asciidoc', dirs: program_path, native: true)
   asciidoc_html = 'xhtml11'
   asciidoc_docbook = 'docbook'
   xmlto_extra = [ ]
@@ -247,7 +254,7 @@ if docs_backend == 'asciidoc'
     asciidoc_conf,
   ]
 elif docs_backend == 'asciidoctor'
-  asciidoctor = find_program('asciidoctor', dirs: program_path)
+  asciidoctor = find_program('asciidoctor', dirs: program_path, native: true)
   asciidoc_html = 'xhtml5'
   asciidoc_docbook = 'docbook5'
   xmlto_extra = [
@@ -289,7 +296,7 @@ if get_option('breaking_changes')
    asciidoc_common_options += ['--attribute', 'with-breaking-changes']
 endif
 
-xmlto = find_program('xmlto', dirs: program_path)
+xmlto = find_program('xmlto', dirs: program_path, native: true)
 
 cmd_lists = [
   'cmds-ancillaryinterrogators.adoc',
@@ -410,7 +417,7 @@ if get_option('docs').contains('html')
     pointing_to: 'git.html',
   )
 
-  xsltproc = find_program('xsltproc', dirs: program_path)
+  xsltproc = find_program('xsltproc', dirs: program_path, native: true)
 
   user_manual_xml = custom_target(
     command: asciidoc_common_options + [
@@ -441,6 +448,7 @@ if get_option('docs').contains('html')
   )
 
   articles = [
+    'BreakingChanges.adoc',
     'DecisionMaking.adoc',
     'MyFirstContribution.adoc',
     'MyFirstObjectWalk.adoc',
@@ -480,7 +488,9 @@ endif
 # Sanity check that we are not missing any tests present in 't/'. This check
 # only runs once at configure time and is thus best-effort, only. Furthermore,
 # it only verifies man pages for the sake of simplicity.
-configured_manpages = manpages.keys() + [ 'git-bisect-lk2009.adoc', 'git-tools.adoc' ]
+configured_manpages = manpages.keys()
+configured_manpages += manpages_breaking_changes.keys()
+configured_manpages += [ 'git-bisect-lk2009.adoc', 'git-tools.adoc' ]
 actual_manpages = run_command(shell, '-c', 'ls git*.adoc scalar.adoc',
   check: true,
   env: script_environment,
