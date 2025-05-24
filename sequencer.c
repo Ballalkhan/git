@@ -13,7 +13,7 @@
 #include "dir.h"
 #include "object-file.h"
 #include "object-name.h"
-#include "object-store-ll.h"
+#include "object-store.h"
 #include "object.h"
 #include "pager.h"
 #include "commit.h"
@@ -225,11 +225,6 @@ struct replay_ctx {
 	 */
 	struct strbuf current_fixups;
 	/*
-	 * Stores the reflog message that will be used when creating a
-	 * commit. Points to a static buffer and should not be free()'d.
-	 */
-	const char *reflog_message;
-	/*
 	 * The number of completed fixup and squash commands in the
 	 * current chain.
 	 */
@@ -265,8 +260,8 @@ static struct update_ref_record *init_update_ref_record(const char *ref)
 
 	CALLOC_ARRAY(rec, 1);
 
-	oidcpy(&rec->before, null_oid());
-	oidcpy(&rec->after, null_oid());
+	oidcpy(&rec->before, null_oid(the_hash_algo));
+	oidcpy(&rec->after, null_oid(the_hash_algo));
 
 	/* This may fail, but that's fine, we will keep the null OID. */
 	refs_read_ref(get_main_ref_store(the_repository), ref, &rec->before);
@@ -667,7 +662,7 @@ static int fast_forward_to(struct repository *r,
 	if (!transaction ||
 	    ref_transaction_update(transaction, "HEAD",
 				   to, unborn && !is_rebase_i(opts) ?
-				   null_oid() : from, NULL, NULL,
+				   null_oid(the_hash_algo) : from, NULL, NULL,
 				   0, sb.buf, &err) ||
 	    ref_transaction_commit(transaction, &err)) {
 		ref_transaction_free(transaction);
@@ -781,28 +776,19 @@ static int do_recursive_merge(struct repository *r,
 	for (i = 0; i < opts->xopts.nr; i++)
 		parse_merge_opt(&o, opts->xopts.v[i]);
 
-	if (!opts->strategy || !strcmp(opts->strategy, "ort")) {
-		memset(&result, 0, sizeof(result));
-		merge_incore_nonrecursive(&o, base_tree, head_tree, next_tree,
-					    &result);
-		show_output = !is_rebase_i(opts) || !result.clean;
-		/*
-		 * TODO: merge_switch_to_result will update index/working tree;
-		 * we only really want to do that if !result.clean || this is
-		 * the final patch to be picked.  But determining this is the
-		 * final patch would take some work, and "head_tree" would need
-		 * to be replace with the tree the index matched before we
-		 * started doing any picks.
-		 */
-		merge_switch_to_result(&o, head_tree, &result, 1, show_output);
-		clean = result.clean;
-	} else {
-		ensure_full_index(r->index);
-		clean = merge_trees(&o, head_tree, next_tree, base_tree);
-		if (is_rebase_i(opts) && clean <= 0)
-			fputs(o.obuf.buf, stdout);
-		strbuf_release(&o.obuf);
-	}
+	memset(&result, 0, sizeof(result));
+	merge_incore_nonrecursive(&o, base_tree, head_tree, next_tree, &result);
+	show_output = !is_rebase_i(opts) || !result.clean;
+	/*
+	 * TODO: merge_switch_to_result will update index/working tree;
+	 * we only really want to do that if !result.clean || this is
+	 * the final patch to be picked.  But determining this is the
+	 * final patch would take some work, and "head_tree" would need
+	 * to be replace with the tree the index matched before we
+	 * started doing any picks.
+	 */
+	merge_switch_to_result(&o, head_tree, &result, 1, show_output);
+	clean = result.clean;
 	if (clean < 0) {
 		rollback_lock_file(&index_lock);
 		return clean;
@@ -1133,10 +1119,10 @@ static int run_command_silent_on_success(struct child_process *cmd)
  * author metadata.
  */
 static int run_git_commit(const char *defmsg,
+			  const char *reflog_action,
 			  struct replay_opts *opts,
 			  unsigned int flags)
 {
-	struct replay_ctx *ctx = opts->ctx;
 	struct child_process cmd = CHILD_PROCESS_INIT;
 
 	if ((flags & CLEANUP_MSG) && (flags & VERBATIM_MSG))
@@ -1154,7 +1140,7 @@ static int run_git_commit(const char *defmsg,
 			     gpg_opt, gpg_opt);
 	}
 
-	strvec_pushf(&cmd.env, GIT_REFLOG_ACTION "=%s", ctx->reflog_message);
+	strvec_pushf(&cmd.env, GIT_REFLOG_ACTION "=%s", reflog_action);
 
 	if (opts->committer_date_is_author_date)
 		strvec_pushf(&cmd.env, "GIT_COMMITTER_DATE=%s",
@@ -1301,7 +1287,7 @@ int update_head_with_reflog(const struct commit *old_head,
 						  0, err);
 	if (!transaction ||
 	    ref_transaction_update(transaction, "HEAD", new_head,
-				   old_head ? &old_head->object.oid : null_oid(),
+				   old_head ? &old_head->object.oid : null_oid(the_hash_algo),
 				   NULL, NULL, 0, sb.buf, err) ||
 	    ref_transaction_commit(transaction, err)) {
 		ret = -1;
@@ -1538,10 +1524,10 @@ static int parse_head(struct repository *r, struct commit **head)
  */
 static int try_to_commit(struct repository *r,
 			 struct strbuf *msg, const char *author,
+			 const char *reflog_action,
 			 struct replay_opts *opts, unsigned int flags,
 			 struct object_id *oid)
 {
-	struct replay_ctx *ctx = opts->ctx;
 	struct object_id tree;
 	struct commit *current_head = NULL;
 	struct commit_list *parents = NULL;
@@ -1703,7 +1689,7 @@ static int try_to_commit(struct repository *r,
 		goto out;
 	}
 
-	if (update_head_with_reflog(current_head, oid, ctx->reflog_message,
+	if (update_head_with_reflog(current_head, oid, reflog_action,
 				    msg, &err)) {
 		res = error("%s", err.buf);
 		goto out;
@@ -1734,6 +1720,7 @@ static int write_rebase_head(struct object_id *oid)
 
 static int do_commit(struct repository *r,
 		     const char *msg_file, const char *author,
+		     const char *reflog_action,
 		     struct replay_opts *opts, unsigned int flags,
 		     struct object_id *oid)
 {
@@ -1749,7 +1736,7 @@ static int do_commit(struct repository *r,
 					   msg_file);
 
 		res = try_to_commit(r, msg_file ? &sb : NULL,
-				    author, opts, flags, &oid);
+				    author, reflog_action, opts, flags, &oid);
 		strbuf_release(&sb);
 		if (!res) {
 			refs_delete_ref(get_main_ref_store(r), "",
@@ -1765,7 +1752,7 @@ static int do_commit(struct repository *r,
 		if (is_rebase_i(opts) && oid)
 			if (write_rebase_head(oid))
 			    return -1;
-		return run_git_commit(msg_file, opts, flags);
+		return run_git_commit(msg_file, reflog_action, opts, flags);
 	}
 
 	return res;
@@ -2235,6 +2222,39 @@ static void refer_to_commit(struct replay_opts *opts,
 	}
 }
 
+static const char *sequencer_reflog_action(struct replay_opts *opts)
+{
+	if (!opts->reflog_action) {
+		opts->reflog_action = getenv(GIT_REFLOG_ACTION);
+		opts->reflog_action =
+			xstrdup(opts->reflog_action ? opts->reflog_action
+						    : action_name(opts));
+	}
+
+	return opts->reflog_action;
+}
+
+__attribute__((format (printf, 3, 4)))
+static const char *reflog_message(struct replay_opts *opts,
+	const char *sub_action, const char *fmt, ...)
+{
+	va_list ap;
+	static struct strbuf buf = STRBUF_INIT;
+
+	va_start(ap, fmt);
+	strbuf_reset(&buf);
+	strbuf_addstr(&buf, sequencer_reflog_action(opts));
+	if (sub_action)
+		strbuf_addf(&buf, " (%s)", sub_action);
+	if (fmt) {
+		strbuf_addstr(&buf, ": ");
+		strbuf_vaddf(&buf, fmt, ap);
+	}
+	va_end(ap);
+
+	return buf.buf;
+}
+
 static int do_pick_commit(struct repository *r,
 			  struct todo_item *item,
 			  struct replay_opts *opts,
@@ -2245,12 +2265,18 @@ static int do_pick_commit(struct repository *r,
 	const char *msg_file = should_edit(opts) ? NULL : git_path_merge_msg(r);
 	struct object_id head;
 	struct commit *base, *next, *parent;
-	const char *base_label, *next_label;
+	const char *base_label, *next_label, *reflog_action;
 	char *author = NULL;
 	struct commit_message msg = { NULL, NULL, NULL, NULL };
 	int res, unborn = 0, reword = 0, allow, drop_commit;
 	enum todo_command command = item->command;
 	struct commit *commit = item->commit;
+
+	if (is_rebase_i(opts))
+		reflog_action = reflog_message(
+			opts, command_to_string(item->command), NULL);
+	else
+		reflog_action = sequencer_reflog_action(opts);
 
 	if (opts->no_commit) {
 		/*
@@ -2503,7 +2529,8 @@ static int do_pick_commit(struct repository *r,
 	} /* else allow == 0 and there's nothing special to do */
 	if (!opts->no_commit && !drop_commit) {
 		if (author || command == TODO_REVERT || (flags & AMEND_MSG))
-			res = do_commit(r, msg_file, author, opts, flags,
+			res = do_commit(r, msg_file, author, reflog_action,
+					opts, flags,
 					commit? &commit->object.oid : NULL);
 		else
 			res = error(_("unable to parse commit author"));
@@ -2518,7 +2545,7 @@ fast_forward_edit:
 			 * got here.
 			 */
 			flags = EDIT_MSG | VERIFY_MSG | AMEND_MSG | ALLOW_EMPTY;
-			res = run_git_commit(NULL, opts, flags);
+			res = run_git_commit(NULL, reflog_action, opts, flags);
 			*check_todo = 1;
 		}
 	}
@@ -3928,39 +3955,6 @@ static int do_label(struct repository *r, const char *name, int len)
 	return ret;
 }
 
-static const char *sequencer_reflog_action(struct replay_opts *opts)
-{
-	if (!opts->reflog_action) {
-		opts->reflog_action = getenv(GIT_REFLOG_ACTION);
-		opts->reflog_action =
-			xstrdup(opts->reflog_action ? opts->reflog_action
-						    : action_name(opts));
-	}
-
-	return opts->reflog_action;
-}
-
-__attribute__((format (printf, 3, 4)))
-static const char *reflog_message(struct replay_opts *opts,
-	const char *sub_action, const char *fmt, ...)
-{
-	va_list ap;
-	static struct strbuf buf = STRBUF_INIT;
-
-	va_start(ap, fmt);
-	strbuf_reset(&buf);
-	strbuf_addstr(&buf, sequencer_reflog_action(opts));
-	if (sub_action)
-		strbuf_addf(&buf, " (%s)", sub_action);
-	if (fmt) {
-		strbuf_addstr(&buf, ": ");
-		strbuf_vaddf(&buf, fmt, ap);
-	}
-	va_end(ap);
-
-	return buf.buf;
-}
-
 static struct commit *lookup_label(struct repository *r, const char *label,
 				   int len, struct strbuf *buf)
 {
@@ -4098,6 +4092,7 @@ static int do_merge(struct repository *r,
 	int merge_arg_len, oneline_offset, can_fast_forward, ret, k;
 	static struct lock_file lock;
 	const char *p;
+	const char *reflog_action = reflog_message(opts, "merge", NULL);
 
 	if (repo_hold_locked_index(r, &lock, LOCK_REPORT_ON_ERROR) < 0) {
 		ret = -1;
@@ -4328,20 +4323,13 @@ static int do_merge(struct repository *r,
 	o.branch2 = ref_name.buf;
 	o.buffer_output = 2;
 
-	if (!opts->strategy || !strcmp(opts->strategy, "ort")) {
-		/*
-		 * TODO: Should use merge_incore_recursive() and
-		 * merge_switch_to_result(), skipping the call to
-		 * merge_switch_to_result() when we don't actually need to
-		 * update the index and working copy immediately.
-		 */
-		ret = merge_ort_recursive(&o,
-					  head_commit, merge_commit, bases,
-					  &i);
-	} else {
-		ret = merge_recursive(&o, head_commit, merge_commit, bases,
-				      &i);
-	}
+	/*
+	 * TODO: Should use merge_incore_recursive() and
+	 * merge_switch_to_result(), skipping the call to
+	 * merge_switch_to_result() when we don't actually need to
+	 * update the index and working copy immediately.
+	 */
+	ret = merge_ort_recursive(&o, head_commit, merge_commit, bases, &i);
 	if (ret <= 0)
 		fputs(o.obuf.buf, stdout);
 	strbuf_release(&o.obuf);
@@ -4352,7 +4340,7 @@ static int do_merge(struct repository *r,
 		goto leave_merge;
 	}
 	/*
-	 * The return value of merge_recursive() is 1 on clean, and 0 on
+	 * The return value of merge_ort_recursive() is 1 on clean, and 0 on
 	 * unclean merge.
 	 *
 	 * Let's reverse that, so that do_merge() returns 0 upon success and
@@ -4376,14 +4364,15 @@ static int do_merge(struct repository *r,
 		 * value (a negative one would indicate that the `merge`
 		 * command needs to be rescheduled).
 		 */
-		ret = !!run_git_commit(git_path_merge_msg(r), opts,
-				       run_commit_flags);
+		ret = !!run_git_commit(git_path_merge_msg(r), reflog_action,
+				       opts, run_commit_flags);
 
 	if (!ret && flags & TODO_EDIT_MERGE_MSG) {
 	fast_forward_edit:
 		*check_todo = 1;
 		run_commit_flags |= AMEND_MSG | EDIT_MSG | VERIFY_MSG;
-		ret = !!run_git_commit(NULL, opts, run_commit_flags);
+		ret = !!run_git_commit(NULL, reflog_action, opts,
+				       run_commit_flags);
 	}
 
 
@@ -4411,7 +4400,7 @@ static int write_update_refs_state(struct string_list *refs_to_oids)
 		goto cleanup;
 	}
 
-	if (safe_create_leading_directories(path)) {
+	if (safe_create_leading_directories(the_repository, path)) {
 		result = error(_("unable to create leading directories of %s"),
 			       path);
 		goto cleanup;
@@ -4677,13 +4666,13 @@ static void create_autostash_internal(struct repository *r,
 		strbuf_add_unique_abbrev(&buf, &oid, DEFAULT_ABBREV);
 
 		if (path) {
-			if (safe_create_leading_directories_const(path))
+			if (safe_create_leading_directories_const(the_repository, path))
 				die(_("Could not create directory for '%s'"),
 				    path);
 			write_file(path, "%s", oid_to_hex(&oid));
 		} else {
 			refs_update_ref(get_main_ref_store(r), "", refname,
-					&oid, null_oid(), 0, UPDATE_REFS_DIE_ON_ERR);
+					&oid, null_oid(the_hash_algo), 0, UPDATE_REFS_DIE_ON_ERR);
 		}
 
 		printf(_("Created autostash: %s\n"), buf.buf);
@@ -4898,13 +4887,9 @@ static int pick_one_commit(struct repository *r,
 			   struct replay_opts *opts,
 			   int *check_todo, int* reschedule)
 {
-	struct replay_ctx *ctx = opts->ctx;
 	int res;
 	struct todo_item *item = todo_list->items + todo_list->current;
 	const char *arg = todo_item_get_arg(todo_list, item);
-	if (is_rebase_i(opts))
-		ctx->reflog_message = reflog_message(
-			opts, command_to_string(item->command), NULL);
 
 	res = do_pick_commit(r, item, opts, is_final_fixup(todo_list),
 			     check_todo);
@@ -4963,9 +4948,8 @@ static int pick_commits(struct repository *r,
 	struct replay_ctx *ctx = opts->ctx;
 	int res = 0, reschedule = 0;
 
-	ctx->reflog_message = sequencer_reflog_action(opts);
 	if (opts->allow_ff)
-		assert(!(opts->signoff || opts->no_commit ||
+		ASSERT(!(opts->signoff || opts->no_commit ||
 			 opts->record_origin || should_edit(opts) ||
 			 opts->committer_date_is_author_date ||
 			 opts->ignore_date));
@@ -5224,6 +5208,7 @@ static int commit_staged_changes(struct repository *r,
 	unsigned int flags = ALLOW_EMPTY | EDIT_MSG;
 	unsigned int final_fixup = 0, is_clean;
 	struct strbuf rev = STRBUF_INIT;
+	const char *reflog_action = reflog_message(opts, "continue", NULL);
 	int ret;
 
 	if (has_unstaged_changes(r, 1)) {
@@ -5386,7 +5371,7 @@ static int commit_staged_changes(struct repository *r,
 	}
 
 	if (run_git_commit(final_fixup ? NULL : rebase_path_message(),
-			   opts, flags)) {
+			   reflog_action, opts, flags)) {
 		ret = error(_("could not commit staged changes."));
 		goto out;
 	}
@@ -5418,7 +5403,6 @@ out:
 
 int sequencer_continue(struct repository *r, struct replay_opts *opts)
 {
-	struct replay_ctx *ctx = opts->ctx;
 	struct todo_list todo_list = TODO_LIST_INIT;
 	int res;
 
@@ -5439,7 +5423,6 @@ int sequencer_continue(struct repository *r, struct replay_opts *opts)
 			unlink(rebase_path_dropped());
 		}
 
-		ctx->reflog_message = reflog_message(opts, "continue", NULL);
 		if (commit_staged_changes(r, opts, &todo_list)) {
 			res = -1;
 			goto release_todo_list;
@@ -5491,7 +5474,6 @@ static int single_pick(struct repository *r,
 			TODO_PICK : TODO_REVERT;
 	item.commit = cmit;
 
-	opts->ctx->reflog_message = sequencer_reflog_action(opts);
 	return do_pick_commit(r, &item, opts, 0, &check_todo);
 }
 
@@ -6069,8 +6051,8 @@ static int make_script_with_merges(struct pretty_print_context *pp,
 	oidset_clear(&interesting);
 	oidset_clear(&child_seen);
 	oidset_clear(&shown);
-	oidmap_free(&commit2todo, 1);
-	oidmap_free(&state.commit2label, 1);
+	oidmap_clear(&commit2todo, 1);
+	oidmap_clear(&state.commit2label, 1);
 	hashmap_clear_and_free(&state.labels, struct labels_entry, entry);
 	strbuf_release(&state.buf);
 

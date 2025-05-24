@@ -4,13 +4,6 @@ test_description='git merge-tree --write-tree'
 
 . ./test-lib.sh
 
-# This test is ort-specific
-if test "$GIT_TEST_MERGE_ALGORITHM" != "ort"
-then
-	skip_all="GIT_TEST_MERGE_ALGORITHM != ort"
-	test_done
-fi
-
 test_expect_success setup '
 	test_write_lines 1 2 3 4 5 >numbers &&
 	echo hello >greeting &&
@@ -71,6 +64,12 @@ test_expect_success 'Clean merge' '
 
 	git ls-tree $TREE_OID >actual &&
 	test_cmp expect actual
+'
+
+# Repeat the previous test, but turn off rename detection
+test_expect_success 'Failed merge without rename detection' '
+	test_must_fail git -c diff.renames=false merge-tree --write-tree side1 side3 >out &&
+	grep "CONFLICT (modify/delete): numbers deleted" out
 '
 
 test_expect_success 'Content merge and a few conflicts' '
